@@ -16,26 +16,43 @@ export interface NpmPackage {
   author?: { name?: string; email?: string };
 }
 
-export interface Maintainer {
-  name: string;
-  email?: string;
-  github?: string;
-  avatarUrl?: string;
-  packages: string[];
-}
-
 export interface Contributor {
   login: string;
   name?: string;
   avatarUrl: string;
   contributions: number;
+  score: number;
   repos: string[];
 }
 
-export interface AnalysisResult {
-  totalPackages: number;
-  totalContributors: number;
+export interface PackageContributors {
+  name: string;
+  downloads: number;
   contributors: Contributor[];
+  totalContributors: number;
+}
+
+export interface CategoryData {
+  contributors: Contributor[];
+  byPackage: PackageContributors[];
+}
+
+export interface AnalysisSummary {
+  totalHumans: number;
+  stackHumans: number;
+  toolsHumans: number;
+  stackPackages: number;
+  toolsPackages: number;
+}
+
+export interface AnalysisData {
+  summary: AnalysisSummary;
+  stack: CategoryData;
+  tools: CategoryData;
+}
+
+export interface AnalysisResult {
+  data: AnalysisData | null;
   isAnalyzing: boolean;
   error?: string;
 }

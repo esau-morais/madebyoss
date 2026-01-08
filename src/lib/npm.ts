@@ -13,6 +13,14 @@ const retrySchedule = Schedule.exponential("100 millis").pipe(
   Schedule.compose(Schedule.recurs(2)),
 );
 
+export function isTypeDefinition(name: string): boolean {
+  return name.startsWith("@types/") || name.startsWith("@types-");
+}
+
+export function filterPackages(names: string[]): string[] {
+  return names.filter((name) => !isTypeDefinition(name));
+}
+
 function fetchPackage(name: string) {
   return Effect.tryPromise({
     try: () =>
@@ -45,6 +53,80 @@ function fetchPackage(name: string) {
     }),
     Effect.retry(retrySchedule),
     Effect.option,
+  );
+}
+
+interface DownloadCount {
+  downloads: number;
+  package: string;
+}
+
+function fetchDownloads(name: string) {
+  return Effect.tryPromise({
+    try: () =>
+      fetch(
+        `https://api.npmjs.org/downloads/point/last-week/${encodeURIComponent(name)}`,
+        {
+          cache: "force-cache",
+          next: { revalidate: REVALIDATE_SECONDS },
+        },
+      ),
+    catch: () => new NpmError({ message: "Network error" }),
+  }).pipe(
+    Effect.timeout(REQUEST_TIMEOUT),
+    Effect.catchTag("TimeoutException", () =>
+      Effect.fail(new NpmError({ message: "Request timeout" })),
+    ),
+    Effect.flatMap((res) => {
+      if (!res.ok) {
+        return Effect.succeed({ downloads: 0, package: name } as DownloadCount);
+      }
+      return Effect.tryPromise({
+        try: async () => {
+          const data = await res.json();
+          return {
+            downloads: data.downloads ?? 0,
+            package: name,
+          } as DownloadCount;
+        },
+        catch: () => new NpmError({ message: "JSON parse error" }),
+      });
+    }),
+    Effect.orElseSucceed(
+      () => ({ downloads: 0, package: name }) as DownloadCount,
+    ),
+  );
+}
+
+export interface PackageData {
+  name: string;
+  pkg: NpmPackage;
+  downloads: number;
+  repo: { owner: string; repo: string } | null;
+}
+
+export function fetchPackagesWithData(names: string[], concurrency = 10) {
+  const effects = names.map((name) =>
+    Effect.all([fetchPackage(name), fetchDownloads(name)]).pipe(
+      Effect.map(([pkgOption, downloads]) => {
+        if (pkgOption._tag === "None") return null;
+        const pkg = pkgOption.value;
+        const repoUrl = pkg.repository?.url;
+        const repo = repoUrl ? parseGitHubRepoUrl(repoUrl) : null;
+        return {
+          name,
+          pkg,
+          downloads: downloads.downloads,
+          repo,
+        } as PackageData;
+      }),
+    ),
+  );
+
+  return Effect.all(effects, { concurrency }).pipe(
+    Effect.map((results) =>
+      results.filter((r): r is PackageData => r !== null),
+    ),
   );
 }
 

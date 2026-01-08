@@ -1,5 +1,6 @@
 import { Data, Effect, Schedule } from "effect";
-import type { Contributor } from "./types";
+import type { PackageData } from "./npm";
+import type { Contributor, PackageContributors } from "./types";
 
 const API_VERSION = "2022-11-28";
 const GITHUB_API_BASE = "https://api.github.com";
@@ -107,6 +108,171 @@ export function parseGitHubRepoUrl(
   return null;
 }
 
+function calculateScore(contributions: number, downloads: number): number {
+  return contributions * Math.log10(downloads + 1);
+}
+
+interface RepoPackageMapping {
+  repoKey: string;
+  packageName: string;
+  downloads: number;
+}
+
+export interface ContributorsResult {
+  contributors: Contributor[];
+  byPackage: PackageContributors[];
+}
+
+export function fetchContributorsForPackages(
+  packages: PackageData[],
+  token: string,
+  { concurrency = 5, maxRepos = 50 } = {},
+): Effect.Effect<ContributorsResult> {
+  const repoToPackages = new Map<string, RepoPackageMapping[]>();
+
+  for (const pkg of packages) {
+    if (!pkg.repo) continue;
+    const repoKey = `${pkg.repo.owner}/${pkg.repo.repo}`;
+    const existing = repoToPackages.get(repoKey) ?? [];
+    existing.push({
+      repoKey,
+      packageName: pkg.name,
+      downloads: pkg.downloads,
+    });
+    repoToPackages.set(repoKey, existing);
+  }
+
+  const uniqueRepos = Array.from(repoToPackages.keys())
+    .slice(0, maxRepos)
+    .map((key) => {
+      const [owner, repo] = key.split("/");
+      return { owner, repo, repoKey: key };
+    });
+
+  const effects = uniqueRepos.map(({ owner, repo, repoKey }) =>
+    fetchRepoContributors(owner, repo, token).pipe(
+      Effect.map((contributors) => ({
+        repoKey,
+        contributors,
+        packages: repoToPackages.get(repoKey) ?? [],
+      })),
+    ),
+  );
+
+  return Effect.all(effects, { concurrency }).pipe(
+    Effect.map((results) => {
+      const contributorMap = new Map<
+        string,
+        {
+          avatarUrl: string;
+          contributions: number;
+          score: number;
+          repos: Set<string>;
+        }
+      >();
+
+      const packageContributorsMap = new Map<
+        string,
+        {
+          downloads: number;
+          contributors: Map<
+            string,
+            { avatarUrl: string; contributions: number }
+          >;
+        }
+      >();
+
+      for (const { repoKey, contributors, packages: pkgMappings } of results) {
+        const totalDownloads = pkgMappings.reduce(
+          (sum, p) => sum + p.downloads,
+          0,
+        );
+
+        for (const pkgMapping of pkgMappings) {
+          if (!packageContributorsMap.has(pkgMapping.packageName)) {
+            packageContributorsMap.set(pkgMapping.packageName, {
+              downloads: pkgMapping.downloads,
+              contributors: new Map(),
+            });
+          }
+        }
+
+        for (const c of contributors) {
+          if (c.type !== "User") continue;
+
+          const score = calculateScore(c.contributions, totalDownloads);
+
+          const existing = contributorMap.get(c.login);
+          if (existing) {
+            existing.contributions += c.contributions;
+            existing.score += score;
+            existing.repos.add(repoKey);
+          } else {
+            contributorMap.set(c.login, {
+              avatarUrl: c.avatar_url,
+              contributions: c.contributions,
+              score,
+              repos: new Set([repoKey]),
+            });
+          }
+
+          for (const pkgMapping of pkgMappings) {
+            const pkgData = packageContributorsMap.get(pkgMapping.packageName);
+            if (pkgData) {
+              const existingContrib = pkgData.contributors.get(c.login);
+              if (existingContrib) {
+                existingContrib.contributions += c.contributions;
+              } else {
+                pkgData.contributors.set(c.login, {
+                  avatarUrl: c.avatar_url,
+                  contributions: c.contributions,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      const contributors: Contributor[] = Array.from(contributorMap.entries())
+        .map(([login, data]) => ({
+          login,
+          avatarUrl: data.avatarUrl,
+          contributions: data.contributions,
+          score: data.score,
+          repos: Array.from(data.repos),
+        }))
+        .sort((a, b) => b.score - a.score);
+
+      const byPackage: PackageContributors[] = Array.from(
+        packageContributorsMap.entries(),
+      )
+        .map(([name, data]) => {
+          const pkgContributors: Contributor[] = Array.from(
+            data.contributors.entries(),
+          )
+            .map(([login, contribData]) => ({
+              login,
+              avatarUrl: contribData.avatarUrl,
+              contributions: contribData.contributions,
+              score: calculateScore(contribData.contributions, data.downloads),
+              repos: [],
+            }))
+            .sort((a, b) => b.contributions - a.contributions);
+
+          return {
+            name,
+            downloads: data.downloads,
+            contributors: pkgContributors.slice(0, 10),
+            totalContributors: pkgContributors.length,
+          };
+        })
+        .sort((a, b) => b.downloads - a.downloads);
+
+      return { contributors, byPackage };
+    }),
+  );
+}
+
 export function fetchContributorsForRepos(
   repos: Array<{ owner: string; repo: string }>,
   token: string,
@@ -157,6 +323,7 @@ export function fetchContributorsForRepos(
           login,
           avatarUrl: data.avatarUrl,
           contributions: data.contributions,
+          score: data.contributions,
           repos: Array.from(data.repos),
         }))
         .sort((a, b) => b.contributions - a.contributions);

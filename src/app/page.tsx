@@ -155,7 +155,7 @@ export default function Home() {
               @mor3is_
             </a>
           </span>
-          <span className="text-border">·</span>
+          <span className="text-muted-foreground">·</span>
           <a
             href="https://github.com/madebyoss/madebyoss"
             className="text-foreground underline underline-offset-4 hover:text-accent"

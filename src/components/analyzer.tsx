@@ -1,82 +1,160 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { NumberTicker } from "~/components/number-ticker";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "~/components/ui/accordion";
 import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Textarea } from "~/components/ui/textarea";
 import { parsePackageJson } from "~/lib/parser";
-import type { AnalysisResult, Contributor } from "~/lib/types";
+import type {
+  AnalysisData,
+  AnalysisResult,
+  CategoryData,
+  Contributor,
+  PackageContributors,
+} from "~/lib/types";
+import { cn } from "~/lib/utils";
 
-function ContributorAvatar({ contributor }: { contributor: Contributor }) {
+function formatDownloads(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
+}
+
+function ContributorAvatar({
+  contributor,
+  size = "md",
+}: {
+  contributor: Contributor;
+  size?: "sm" | "md";
+}) {
+  const sizeClass = size === "sm" ? "size-10" : "size-16";
+  const textClass = size === "sm" ? "max-w-10 text-[10px]" : "max-w-20 text-xs";
+  const containerClass = size === "sm" ? "w-10" : "w-20";
+
   return (
-    <div className="flex w-20 flex-col items-center gap-2">
+    <div className={cn("flex flex-col items-center gap-1", containerClass)}>
       {/* biome-ignore lint/performance/noImgElement: dynamic external avatars */}
       <img
         src={contributor.avatarUrl}
         alt=""
         aria-hidden="true"
-        className="size-16 border border-border"
+        className={cn("border border-border", sizeClass)}
         loading="lazy"
       />
-      <span className="max-w-20 truncate font-mono text-xs text-muted-foreground">
+      <span
+        className={cn("truncate font-mono text-muted-foreground", textClass)}
+      >
         {contributor.name || contributor.login}
       </span>
     </div>
   );
 }
 
-function ContributorAvatarSkeleton() {
+function AnalyzingState({ packageCount }: { packageCount: number }) {
   return (
-    <div className="flex w-20 flex-col items-center gap-2">
-      <Skeleton className="size-16 rounded-none" />
-      <Skeleton className="h-3 w-14 rounded-none" />
+    <div className="mt-12 flex min-h-[400px] flex-col items-center justify-center gap-4">
+      <div className="flex gap-1">
+        <span className="size-2 animate-pulse bg-accent [animation-delay:0ms]" />
+        <span className="size-2 animate-pulse bg-accent [animation-delay:150ms]" />
+        <span className="size-2 animate-pulse bg-accent [animation-delay:300ms]" />
+      </div>
+      <p className="font-mono text-sm text-muted-foreground">
+        Analyzing {packageCount} packages…
+      </p>
     </div>
   );
 }
 
-function ResultsSkeleton() {
+function PackageCard({ pkg }: { pkg: PackageContributors }) {
+  const topContributors = pkg.contributors.slice(0, 4);
+  const remaining = pkg.totalContributors - 4;
+
   return (
-    <div className="mt-12 flex flex-col items-center gap-6">
-      <div className="text-center">
-        <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-          Your stack is made by
+    <div className="border border-border bg-card p-4">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-sm text-foreground">{pkg.name}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {formatDownloads(pkg.downloads)}/wk
+        </span>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        {topContributors.map((c) => (
+          <ContributorAvatar key={c.login} contributor={c} size="sm" />
+        ))}
+        {remaining > 0 && (
+          <div className="flex size-10 items-center justify-center border border-border bg-secondary font-mono text-xs text-muted-foreground">
+            +{remaining}
+          </div>
+        )}
+      </div>
+      <p className="mt-2 font-mono text-xs text-muted-foreground">
+        {pkg.totalContributors} contributors
+      </p>
+    </div>
+  );
+}
+
+function PackageBreakdown({ packages }: { packages: PackageContributors[] }) {
+  if (packages.length === 0) return null;
+
+  return (
+    <Accordion type="single" collapsible className="w-full">
+      <AccordionItem value="packages" className="border-b-0">
+        <AccordionTrigger>See by package</AccordionTrigger>
+        <AccordionContent>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {packages.map((pkg) => (
+              <PackageCard key={pkg.name} pkg={pkg} />
+            ))}
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  );
+}
+
+function CategoryResults({
+  data,
+  label,
+  packagesLabel,
+  onGenerateCard,
+}: {
+  data: CategoryData;
+  label: string;
+  packagesLabel: string;
+  onGenerateCard: () => void;
+}) {
+  const topContributors = data.contributors.slice(0, 4);
+  const remaining = data.contributors.length - 4;
+
+  if (data.contributors.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-8 text-center">
+        <p className="font-mono text-sm text-muted-foreground">
+          No{" "}
+          {label.toLowerCase().replace("your ", "").replace(" is made by", "")}{" "}
+          found
         </p>
-        <div className="mt-2 flex justify-center">
-          <Skeleton className="h-16 w-24 rounded-none md:h-10" />
-        </div>
-        <p className="font-mono text-sm text-muted-foreground">humans</p>
       </div>
-
-      <div className="flex flex-wrap items-start justify-center gap-4">
-        <ContributorAvatarSkeleton />
-        <ContributorAvatarSkeleton />
-        <ContributorAvatarSkeleton />
-        <ContributorAvatarSkeleton />
-        <div className="flex w-20 flex-col items-center gap-2">
-          <Skeleton className="size-16 rounded-none" />
-          <span className="font-mono text-xs text-transparent">_</span>
-        </div>
-      </div>
-
-      <Skeleton className="h-5 w-36 rounded-none" />
-
-      <Skeleton className="mt-6 h-9 w-48 rounded-none" />
-    </div>
-  );
-}
-
-function Results({ result }: { result: AnalysisResult }) {
-  const topContributors = result.contributors.slice(0, 4);
-  const remaining = result.totalContributors - 4;
+    );
+  }
 
   return (
-    <div className="mt-12 flex flex-col items-center gap-6">
+    <div className="flex flex-col items-center gap-6">
       <div className="text-center">
         <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-          Your stack is made by
+          {label}
         </p>
         <p className="mt-2 font-mono text-6xl font-bold tracking-tight md:text-7xl">
-          {result.totalContributors}
+          <NumberTicker value={data.contributors.length} />
         </p>
         <p className="font-mono text-sm text-muted-foreground">humans</p>
       </div>
@@ -95,24 +173,74 @@ function Results({ result }: { result: AnalysisResult }) {
         )}
       </div>
 
-      <p className="font-mono text-sm text-muted-foreground">
-        across {result.totalPackages} packages
-      </p>
+      <p className="font-mono text-sm text-muted-foreground">{packagesLabel}</p>
 
-      <Button
-        onClick={() => {
-          const contributorNames = result.contributors
-            .slice(0, 4)
-            .map((c) => c.login)
-            .join(",");
-          const url = `/api/og?humans=${result.totalContributors}&packages=${result.totalPackages}&maintainers=${encodeURIComponent(contributorNames)}`;
-          window.open(url, "_blank");
-        }}
-        variant="outline"
-        className="mt-6"
-      >
+      <Button onClick={onGenerateCard} variant="outline">
         Generate shareable card
       </Button>
+
+      <PackageBreakdown packages={data.byPackage} />
+    </div>
+  );
+}
+
+function Results({ data }: { data: AnalysisData }) {
+  const [activeTab, setActiveTab] = useState("stack");
+
+  const handleGenerateCard = (tab: string) => {
+    const category = tab === "stack" ? data.stack : data.tools;
+    const contributorNames = category.contributors
+      .slice(0, 4)
+      .map((c) => c.login)
+      .join(",");
+    const humans =
+      tab === "stack" ? data.summary.stackHumans : data.summary.toolsHumans;
+    const packages =
+      tab === "stack" ? data.summary.stackPackages : data.summary.toolsPackages;
+    const url = `/api/og?humans=${humans}&packages=${packages}&maintainers=${encodeURIComponent(contributorNames)}&type=${tab}`;
+    window.open(url, "_blank");
+  };
+
+  return (
+    <div className="mt-12 flex flex-col items-center">
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="flex flex-col items-center"
+      >
+        <TabsList>
+          <TabsTrigger value="stack">
+            Stack{" "}
+            <span className="text-xs text-accent">
+              {data.summary.stackHumans}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="tools">
+            Tools{" "}
+            <span className="text-xs text-accent">
+              {data.summary.toolsHumans}
+            </span>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="stack" className="mt-8">
+          <CategoryResults
+            data={data.stack}
+            label="Your stack is made by"
+            packagesLabel={`across ${data.summary.stackPackages} packages`}
+            onGenerateCard={() => handleGenerateCard("stack")}
+          />
+        </TabsContent>
+
+        <TabsContent value="tools" className="mt-8">
+          <CategoryResults
+            data={data.tools}
+            label="Your tools are made by"
+            packagesLabel={`across ${data.summary.toolsPackages} packages`}
+            onGenerateCard={() => handleGenerateCard("tools")}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -120,28 +248,29 @@ function Results({ result }: { result: AnalysisResult }) {
 export function Analyzer() {
   const [input, setInput] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const cacheRef = useRef<Map<string, AnalysisResult>>(new Map());
+  const cacheRef = useRef<Map<string, AnalysisData>>(new Map());
 
-  const dependencies = useMemo(() => {
+  const parsed = useMemo(() => {
     try {
-      return parsePackageJson(input).all;
+      return parsePackageJson(input);
     } catch {
-      return [];
+      return null;
     }
   }, [input]);
 
-  const cacheKey = useMemo(
-    () =>
-      dependencies.length > 0 ? dependencies.slice().sort().join(",") : "",
-    [dependencies],
-  );
+  const cacheKey = useMemo(() => {
+    if (!parsed) return "";
+    const all = [...parsed.dependencies, ...parsed.devDependencies].sort();
+    return all.join(",");
+  }, [parsed]);
 
   const analyze = async () => {
-    if (dependencies.length === 0) {
+    if (
+      !parsed ||
+      (parsed.dependencies.length === 0 && parsed.devDependencies.length === 0)
+    ) {
       setResult({
-        totalPackages: 0,
-        totalContributors: 0,
-        contributors: [],
+        data: null,
         isAnalyzing: false,
         error: "No dependencies found",
       });
@@ -150,22 +279,20 @@ export function Analyzer() {
 
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
-      setResult(cached);
+      setResult({ data: cached, isAnalyzing: false });
       return;
     }
 
-    setResult({
-      totalPackages: dependencies.length,
-      totalContributors: 0,
-      contributors: [],
-      isAnalyzing: true,
-    });
+    setResult({ data: null, isAnalyzing: true });
 
     try {
       const res = await fetch("/api/contributors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dependencies }),
+        body: JSON.stringify({
+          dependencies: parsed.dependencies,
+          devDependencies: parsed.devDependencies,
+        }),
       });
 
       if (!res.ok) {
@@ -173,22 +300,12 @@ export function Analyzer() {
         throw new Error(error.error || "Failed to fetch contributors");
       }
 
-      const data = await res.json();
-
-      const newResult: AnalysisResult = {
-        totalPackages: data.totalPackages,
-        totalContributors: data.contributors.length,
-        contributors: data.contributors,
-        isAnalyzing: false,
-      };
-
-      cacheRef.current.set(cacheKey, newResult);
-      setResult(newResult);
+      const data: AnalysisData = await res.json();
+      cacheRef.current.set(cacheKey, data);
+      setResult({ data, isAnalyzing: false });
     } catch (err) {
       setResult({
-        totalPackages: 0,
-        totalContributors: 0,
-        contributors: [],
+        data: null,
         isAnalyzing: false,
         error:
           err instanceof Error ? err.message : "Invalid package.json format",
@@ -227,11 +344,15 @@ export function Analyzer() {
         </div>
       </div>
 
-      {result?.isAnalyzing && <ResultsSkeleton />}
-
-      {result && !result.isAnalyzing && !result.error && (
-        <Results result={result} />
+      {result?.isAnalyzing && parsed && (
+        <AnalyzingState
+          packageCount={
+            parsed.dependencies.length + parsed.devDependencies.length
+          }
+        />
       )}
+
+      {result?.data && !result.isAnalyzing && <Results data={result.data} />}
     </div>
   );
 }

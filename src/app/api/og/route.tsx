@@ -1,27 +1,15 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import type { NextRequest } from "next/server";
 
-async function loadGoogleFont(font: string, text: string, weight = 400) {
-  const url = `https://fonts.googleapis.com/css2?family=${font}:wght@${weight}&text=${encodeURIComponent(text)}`;
-  const css = await (await fetch(url)).text();
-  const resource = css.match(
-    /src: url\((.+)\) format\('(opentype|truetype)'\)/,
-  );
-
-  if (resource) {
-    const response = await fetch(resource[1]);
-    if (response.status === 200) {
-      return await response.arrayBuffer();
-    }
-  }
-
-  throw new Error("failed to load font data");
-}
+const fontsDir = join(process.cwd(), "src/app/api/og/fonts");
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const humans = searchParams.get("humans") || "0";
   const packages = searchParams.get("packages") || "0";
+  const type = searchParams.get("type") || "stack";
   const maintainersParam = searchParams.get("maintainers") || "";
   const maintainers = maintainersParam
     ? maintainersParam.split(",").filter(Boolean)
@@ -30,11 +18,12 @@ export async function GET(request: NextRequest) {
   const humansCount = Number.parseInt(humans, 10) || 0;
   const remaining = Math.max(0, humansCount - 4);
 
-  const allText = `made by${humans}humans${packages}packages+${remaining}madebyoss.com`;
+  const label =
+    type === "tools" ? "my tools are made by" : "my stack is made by";
 
   const [geistRegular, geistMono] = await Promise.all([
-    loadGoogleFont("Geist", allText, 400),
-    loadGoogleFont("Geist+Mono", `${humans}${packages}+${remaining}`, 700),
+    readFile(join(fontsDir, "Geist-Regular.ttf")),
+    readFile(join(fontsDir, "GeistMono-Bold.ttf")),
   ]);
 
   return new ImageResponse(
@@ -120,7 +109,7 @@ export async function GET(request: NextRequest) {
           textTransform: "uppercase",
         }}
       >
-        made by
+        {label}
       </div>
 
       {/* Main number */}
