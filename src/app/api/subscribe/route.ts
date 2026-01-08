@@ -51,6 +51,16 @@ export async function POST(request: Request) {
       throw new Error("Missing RESEND_API_KEY environment variable");
     }
 
+    const { data: existingContact } = await resend.contacts.get({ email });
+
+    if (existingContact) {
+      console.log("[Resend] Contact already exists:", email);
+      return Response.json({
+        success: true,
+        alreadySubscribed: true,
+      });
+    }
+
     const { data, error } = await resend.contacts.create({
       email,
       unsubscribed: false,
@@ -64,7 +74,7 @@ export async function POST(request: Request) {
     console.log("[Resend] Contact created:", data?.id);
     await notifyDiscord(email);
 
-    return Response.json({ success: true });
+    return Response.json({ success: true, alreadySubscribed: false });
   } catch (err) {
     console.error("[Subscribe] Error:", err);
     return Response.json(

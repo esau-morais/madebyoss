@@ -157,7 +157,7 @@ export default function Home() {
           </span>
           <span className="text-muted-foreground">·</span>
           <a
-            href="https://github.com/madebyoss/madebyoss"
+            href="https://github.com/esau-morais/madebyoss"
             className="text-foreground underline underline-offset-4 hover:text-accent"
           >
             GitHub

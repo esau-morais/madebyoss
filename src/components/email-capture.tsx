@@ -16,7 +16,9 @@ const subscribeSchema = z.object({
 type SubscribeForm = z.infer<typeof subscribeSchema>;
 
 export function EmailCapture() {
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "success" | "already_subscribed" | "error"
+  >("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const {
@@ -39,7 +41,12 @@ export function EmailCapture() {
       });
 
       if (res.ok) {
-        setStatus("success");
+        const json = await res.json();
+        if (json.alreadySubscribed) {
+          setStatus("already_subscribed");
+        } else {
+          setStatus("success");
+        }
         reset();
       } else {
         const json = await res.json().catch(() => ({}));
@@ -58,6 +65,14 @@ export function EmailCapture() {
     return (
       <p className="font-mono text-sm text-muted-foreground">
         Thanks! We&apos;ll keep you posted.
+      </p>
+    );
+  }
+
+  if (status === "already_subscribed") {
+    return (
+      <p className="font-mono text-sm text-muted-foreground">
+        You&apos;re already on the list!
       </p>
     );
   }
